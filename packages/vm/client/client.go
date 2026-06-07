@@ -1,7 +1,10 @@
 package client
 
 import (
+	"bytes"
 	"context"
+	"fmt"
+	"io"
 	"net"
 	"net/http"
 )
@@ -19,8 +22,28 @@ func FirecrakerClient(socketPath string) *http.Client {
 	}
 }
 
-func CallFirecraker(){
-	
+func CallFirecraker(client *http.Client, method, path string, body []byte) error {
+	req, err := http.NewRequest(method, "http://localhost"+path, bytes.NewReader(body))
+
+	if err != nil {
+		fmt.Println(err.Error())
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := client.Do(req)
+
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	data, err := io.ReadAll(resp.Body)
+
+	fmt.Println("Started the  data")
+
+	fmt.Println("Body ", string(data))
+
+	return nil
+
 }
-
-

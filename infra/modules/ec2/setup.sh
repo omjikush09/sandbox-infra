@@ -51,7 +51,8 @@ EOF
 
 
 firecracker --no-api --config-file vm-config.json
-
+#SOKET start
+firecracker --api-sock /tmp/firecracker.socket
 #VM command
 ip addr add 172.16.0.2/24 dev eth0
 ip link set eth0 up
