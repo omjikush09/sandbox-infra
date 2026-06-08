@@ -29,7 +29,7 @@ jobs:
       - name: Setup host dependencies
         run: |
           sudo apt update
-          sudo apt install -y debootstrap e2fsprogs curl zstd unzip
+          sudo apt install -y debootstrap e2fsprogs curl zstd
 
       - name: Create empty rootfs
         run: |
@@ -68,7 +68,8 @@ jobs:
               ca-certificates \
               git \
               iproute2 \
-              iputils-ping
+              iputils-ping \
+              unzip
           "
 
       - name: Install Bun inside rootfs
