@@ -14,14 +14,14 @@ func ExecuteJS(c fiber.Ctx) error {
 		return err
 	}
 	// fmt.Println(executeData)
-	data, err := services.ExecuteJS(executeData)
+	err := services.WriteToFile(executeData)
 	if err != nil {
-		c.Status(500).JSON(fiber.Map{
+		return c.Status(500).JSON(fiber.Map{
 			"error": err.Error(),
 		})
 	}
-	c.Status(200).JSON(fiber.Map{
+	data, _ := services.ExecuteJS()
+	return c.Status(200).JSON(fiber.Map{
 		"data": data,
 	})
-	return nil
 }

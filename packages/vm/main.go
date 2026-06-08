@@ -1,24 +1,128 @@
 package main
 
 import (
+	"context"
 	"fmt"
+	"io"
 	"net/http"
+	"os"
+	"os/exec"
 
-	"github.com/omjikush09/sandboxing-infra/packages/vm/client"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/gofiber/fiber/v3"
+	"github.com/omjikush09/sandboxing-infra/packages/vm/router"
 )
 
+const firecrackerLabPath = "/home/ubuntu/firecracker-lab"
+
 func main() {
-
-	path := "/tmp/firecracker.socket"
-
-	httpClient := client.FirecrakerClient(path)
-
-	//Get machine config
-	// body:=[]byte(``)
-	err := client.CallFirecraker(httpClient, http.MethodGet, "/", nil)
+	err := initSystem()
 	if err != nil {
-		fmt.Println(err)
+		fmt.Println(err.Error())
+		return
 	}
-	
 
+	app := fiber.New()
+
+	router.Start(app)
+
+	PORT := "8000"
+	if err := app.Listen(":" + PORT); err != nil {
+		fmt.Println(err.Error())
+	}
+
+}
+
+func initSystem() error {
+	if err := os.MkdirAll(firecrackerLabPath, 0755); err != nil {
+		return err
+	}
+
+	rootfsPath := firecrackerLabPath + "/rootfs.ext4"
+	if _, err := os.Stat(rootfsPath); err != nil {
+		if !os.IsNotExist(err) {
+			return err
+		}
+		if err := downloadRootfs(firecrackerLabPath); err != nil {
+			return err
+		}
+	}
+
+	kernelPath := firecrackerLabPath + "/vmlinux.bin"
+	if _, err := os.Stat(kernelPath); err != nil {
+		if !os.IsNotExist(err) {
+			return err
+		}
+		if err := downloadFile(
+			"https://s3.amazonaws.com/spec.ccfc.min/img/quickstart_guide/x86_64/kernels/vmlinux.bin",
+			kernelPath,
+		); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func downloadRootfs(folderPath string) error {
+	cfg, err := config.LoadDefaultConfig(context.Background())
+	if err != nil {
+		return err
+	}
+
+	s3Client := s3.NewFromConfig(cfg)
+
+	resp, err := s3Client.GetObject(context.Background(), &s3.GetObjectInput{
+		Bucket: aws.String("firecracker-rootfs-bucket"),
+		Key:    aws.String("firecracker/rootfs" + "/node-agent-rootfs" + ".ext4" + ".zst"),
+	})
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	file, err := os.Create(folderPath + "/rootfs.ext4.zst")
+	if err != nil {
+		return err
+	}
+
+	_, err = io.Copy(file, resp.Body)
+	if err != nil {
+		file.Close()
+		return err
+	}
+	if err := file.Close(); err != nil {
+		return err
+	}
+
+	cmd := exec.Command("zstd", "-d", folderPath+"/rootfs.ext4.zst")
+	err = cmd.Run()
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func downloadFile(url, path string) error {
+	resp, err := http.Get(url)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return fmt.Errorf("download failed for %s with status %s", url, resp.Status)
+	}
+
+	file, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	_, err = io.Copy(file, resp.Body)
+	return err
 }
