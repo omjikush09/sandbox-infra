@@ -23,6 +23,7 @@ func Execute(c fiber.Ctx) error {
 			"error": "Failed to create vm",
 		})
 	}
+	defer vm.Cleanup(cmd)
 
 	resp, err := http.Post("http://"+vm.GuestIP+":3000/api/execute/js", "application/json", bytes.NewBuffer(c.Body()))
 

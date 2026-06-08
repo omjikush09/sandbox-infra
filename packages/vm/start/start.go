@@ -2,8 +2,11 @@ package start
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
+	"io"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -21,6 +24,7 @@ type VM struct {
 	Id         string
 	Name       string
 	SocketPath string
+	LogPath    string
 	TapName    string // This is cable
 	ipAddress  string
 	HostTapIP  string
@@ -34,7 +38,7 @@ type VM struct {
 
 func run(cmd string, args ...string) error {
 	c := exec.Command(cmd, args...)
-	c.Stdout = os.Stdin
+	c.Stdin = os.Stdin
 	c.Stdout = os.Stdout
 	c.Stderr = os.Stderr
 
@@ -50,6 +54,7 @@ func newVM(id int) VM {
 	vm := VM{
 		Id:         strconv.Itoa(id),
 		SocketPath: fmt.Sprintf("/tmp/%s.socket", name),
+		LogPath:    fmt.Sprintf("/tmp/%s.log", name),
 		Name:       name,
 		TapName:    fmt.Sprintf("tap-%s", name),
 		GuestIP:    guestIP,
@@ -65,11 +70,26 @@ func newVM(id int) VM {
 func (vm *VM) prepareRootfs() error {
 
 	if _, err := os.Stat(vm.RootfsPath); err == nil {
-		return nil
+		if err := os.Remove(vm.RootfsPath); err != nil {
+			return err
+		}
 	}
 
 	return run("cp", vm.BaseRootfs, vm.RootfsPath)
 
+}
+
+func tapDeviceExists(name string) (bool, error) {
+	cmd := exec.Command("ip", "link", "show", "dev", name)
+	if err := cmd.Run(); err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			return false, nil
+		}
+		return false, err
+	}
+
+	return true, nil
 }
 
 func (vm *VM) SetUpNework() error {
@@ -80,11 +100,13 @@ func (vm *VM) SetUpNework() error {
 
 	// assign host-side IP to tap
 	if err := run("sudo", "ip", "addr", "add", vm.HostIP+"/24", "dev", vm.TapName); err != nil {
+		_ = vm.deleteTapDevice()
 		return err
 	}
 
 	// bring tap up
 	if err := run("sudo", "ip", "link", "set", vm.TapName, "up"); err != nil {
+		_ = vm.deleteTapDevice()
 		return err
 	}
 
@@ -113,6 +135,42 @@ func (vm *VM) SetUpNework() error {
 	return nil
 }
 
+func (vm *VM) deleteTapDevice() error {
+	exists, err := tapDeviceExists(vm.TapName)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return nil
+	}
+
+	return run("sudo", "ip", "link", "delete", vm.TapName)
+}
+
+func (vm *VM) Cleanup(cmd *exec.Cmd) {
+	if cmd != nil && cmd.Process != nil {
+		if err := cmd.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
+			log.Printf("failed to kill firecracker process for vm=%s pid=%d err=%v", vm.Name, cmd.Process.Pid, err)
+		}
+		if err := cmd.Wait(); err != nil {
+			var exitErr *exec.ExitError
+			if !errors.As(err, &exitErr) {
+				log.Printf("failed waiting for firecracker process cleanup vm=%s err=%v", vm.Name, err)
+			}
+		}
+	}
+
+	if err := vm.deleteTapDevice(); err != nil {
+		log.Printf("failed to delete tap device for vm=%s tap=%s err=%v", vm.Name, vm.TapName, err)
+	}
+	if err := os.Remove(vm.SocketPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		log.Printf("failed to remove firecracker socket for vm=%s socket=%s err=%v", vm.Name, vm.SocketPath, err)
+	}
+	if err := os.Remove(vm.RootfsPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		log.Printf("failed to remove rootfs for vm=%s rootfs=%s err=%v", vm.Name, vm.RootfsPath, err)
+	}
+}
+
 func StartVM() {
 
 }
@@ -120,13 +178,20 @@ func StartVM() {
 func (vm *VM) startFirecraker() (*exec.Cmd, error) {
 	_ = os.Remove(vm.SocketPath)
 
-	cmd := exec.Command("firecracker", "--api-sock", vm.SocketPath)
-	cmd.Stdout = os.Stdout
-	cmd.Stdin = os.Stdin
-
-	if err := cmd.Start(); err != nil {
+	logFile, err := os.OpenFile(vm.LogPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+	if err != nil {
 		return nil, err
 	}
+
+	cmd := exec.Command("firecracker", "--api-sock", vm.SocketPath)
+	cmd.Stdout = logFile
+	cmd.Stderr = logFile
+
+	if err := cmd.Start(); err != nil {
+		_ = logFile.Close()
+		return nil, err
+	}
+	_ = logFile.Close()
 	return cmd, nil
 
 }
@@ -143,6 +208,22 @@ func (vm *VM) waitForSocket(timeout time.Duration) error {
 	return fmt.Errorf("socket not created: %s", vm.SocketPath)
 }
 
+func (vm *VM) waitForAgent(timeout time.Duration) error {
+	address := net.JoinHostPort(vm.GuestIP, "3000")
+	deadline := time.Now().Add(timeout)
+
+	for time.Now().Before(deadline) {
+		conn, err := net.DialTimeout("tcp", address, 500*time.Millisecond)
+		if err == nil {
+			_ = conn.Close()
+			return nil
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+
+	return fmt.Errorf("agent not reachable at %s", address)
+}
+
 func put(client *http.Client, path string, body string) error {
 	req, err := http.NewRequest(http.MethodPut, "http://localhost"+path, bytes.NewBufferString(body))
 
@@ -157,8 +238,13 @@ func put(client *http.Client, path string, body string) error {
 	}
 	defer resp.Body.Close()
 
+	respBody, readErr := io.ReadAll(resp.Body)
+	if readErr != nil {
+		return readErr
+	}
+
 	if resp.Status < "200" || resp.Status >= "300" {
-		return fmt.Errorf("Put is failed for path %s with  status %s", path, resp.Status)
+		return fmt.Errorf("PUT %s failed with status %s body=%s", path, resp.Status, string(respBody))
 	}
 
 	return nil
@@ -215,22 +301,53 @@ func (vm *VM) ConfigVm() error {
 
 var count atomic.Int32
 
-func CreateVm() (*VM, *exec.Cmd, error) {
-	if int(count.Load()) >= 254 {
-		return nil, nil, fmt.Errorf("We are out of capacity")
+func nextVM() (VM, error) {
+	for attempts := 0; attempts < 254; attempts++ {
+		counter := count.Add(1)
+		if counter > 254 {
+			count.Store(0)
+			counter = count.Add(1)
+		}
+
+		vm := newVM(int(counter))
+		exists, err := tapDeviceExists(vm.TapName)
+		if err != nil {
+			return VM{}, err
+		}
+		if exists {
+			log.Printf("skipping vm name=%s because tap device already exists tap=%s", vm.Name, vm.TapName)
+			continue
+		}
+		if _, err := os.Stat(vm.SocketPath); err == nil {
+			log.Printf("skipping vm name=%s because socket already exists socket=%s", vm.Name, vm.SocketPath)
+			continue
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return VM{}, err
+		}
+
+		return vm, nil
 	}
-	counter := count.Add(1)
-	vm := newVM(int(counter))
-	log.Printf("creating vm name=%s guest_ip=%s host_ip=%s socket=%s tap=%s rootfs=%s", vm.Name, vm.GuestIP, vm.HostIP, vm.SocketPath, vm.TapName, vm.RootfsPath)
+
+	return VM{}, fmt.Errorf("no free vm slot available")
+}
+
+func CreateVm() (*VM, *exec.Cmd, error) {
+	vm, err := nextVM()
+	if err != nil {
+		return nil, nil, err
+	}
+	log.Printf("creating vm name=%s guest_ip=%s host_ip=%s socket=%s tap=%s rootfs=%s firecracker_log=%s", vm.Name, vm.GuestIP, vm.HostIP, vm.SocketPath, vm.TapName, vm.RootfsPath, vm.LogPath)
 
 	if err := vm.prepareRootfs(); err != nil {
 		log.Printf("failed to prepare rootfs for vm=%s rootfs=%s base_rootfs=%s err=%v", vm.Name, vm.RootfsPath, vm.BaseRootfs, err)
+		_ = os.Remove(vm.RootfsPath)
 		return nil, nil, fmt.Errorf("prepare rootfs: %w", err)
 	}
 	log.Printf("prepared rootfs for vm=%s rootfs=%s", vm.Name, vm.RootfsPath)
 
 	if err := vm.SetUpNework(); err != nil {
 		log.Printf("failed to setup network for vm=%s tap=%s host_ip=%s err=%v", vm.Name, vm.TapName, vm.HostIP, err)
+		vm.Cleanup(nil)
 		return nil, nil, fmt.Errorf("setup network: %w", err)
 	}
 	log.Printf("configured network for vm=%s tap=%s host_ip=%s", vm.Name, vm.TapName, vm.HostIP)
@@ -239,25 +356,28 @@ func CreateVm() (*VM, *exec.Cmd, error) {
 
 	if err != nil {
 		log.Printf("failed to start firecracker for vm=%s socket=%s err=%v", vm.Name, vm.SocketPath, err)
+		vm.Cleanup(nil)
 		return nil, nil, fmt.Errorf("start firecracker: %w", err)
 	}
-	log.Printf("started firecracker process for vm=%s pid=%d socket=%s", vm.Name, cmd.Process.Pid, vm.SocketPath)
+	log.Printf("started firecracker process for vm=%s pid=%d socket=%s log=%s", vm.Name, cmd.Process.Pid, vm.SocketPath, vm.LogPath)
 
 	if err := vm.waitForSocket(2 * time.Second); err != nil {
 		log.Printf("failed waiting for firecracker socket for vm=%s socket=%s err=%v", vm.Name, vm.SocketPath, err)
-		if cmd.Process != nil {
-			_ = cmd.Process.Kill()
-		}
-		return nil, cmd, fmt.Errorf("wait for socket: %w", err)
+		vm.Cleanup(cmd)
+		return nil, nil, fmt.Errorf("wait for socket: %w", err)
 	}
 	log.Printf("firecracker socket ready for vm=%s socket=%s", vm.Name, vm.SocketPath)
 
 	if err := vm.ConfigVm(); err != nil {
 		log.Printf("failed to configure/start firecracker vm=%s socket=%s tap=%s err=%v", vm.Name, vm.SocketPath, vm.TapName, err)
-		if cmd.Process != nil {
-			_ = cmd.Process.Kill()
-		}
-		return nil, cmd, fmt.Errorf("configure vm: %w", err)
+		vm.Cleanup(cmd)
+		return nil, nil, fmt.Errorf("configure vm: %w", err)
+	}
+
+	if err := vm.waitForAgent(30 * time.Second); err != nil {
+		log.Printf("failed waiting for agent vm=%s guest_ip=%s log=%s err=%v", vm.Name, vm.GuestIP, vm.LogPath, err)
+		vm.Cleanup(cmd)
+		return nil, nil, fmt.Errorf("wait for agent: %w", err)
 	}
 
 	log.Printf("started vm=%s guest_ip=%s socket=%s tap=%s", vm.Name, vm.GuestIP, vm.SocketPath, vm.TapName)
