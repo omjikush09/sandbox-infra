@@ -12,7 +12,10 @@ import (
 func Execute(c fiber.Ctx) error {
 
 	vm, cmd, err := start.CreateVm()
-	defer cmd.Process.Kill()
+	if err != nil {
+
+		defer cmd.Process.Kill()
+	}
 
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
