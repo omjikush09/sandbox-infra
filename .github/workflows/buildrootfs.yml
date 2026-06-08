@@ -24,7 +24,7 @@ jobs:
 
       - name: Build agent
         run: |
-          GOOS=linux GOARCH=amd64 go build -o my-agent ./cmd/agent
+          GOOS=linux GOARCH=amd64 go build -o my-agent ./packages/envd
 
       - name: Setup host dependencies
         run: |
