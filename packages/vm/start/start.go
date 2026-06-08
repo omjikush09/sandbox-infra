@@ -3,6 +3,7 @@ package start
 import (
 	"bytes"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"os/exec"
@@ -35,6 +36,7 @@ func run(cmd string, args ...string) error {
 	c := exec.Command(cmd, args...)
 	c.Stdout = os.Stdin
 	c.Stdout = os.Stdout
+	c.Stderr = os.Stderr
 
 	return c.Run()
 }
@@ -219,35 +221,46 @@ func CreateVm() (*VM, *exec.Cmd, error) {
 	}
 	counter := count.Add(1)
 	vm := newVM(int(counter))
+	log.Printf("creating vm name=%s guest_ip=%s host_ip=%s socket=%s tap=%s rootfs=%s", vm.Name, vm.GuestIP, vm.HostIP, vm.SocketPath, vm.TapName, vm.RootfsPath)
 
 	if err := vm.prepareRootfs(); err != nil {
-		return nil, nil, err
+		log.Printf("failed to prepare rootfs for vm=%s rootfs=%s base_rootfs=%s err=%v", vm.Name, vm.RootfsPath, vm.BaseRootfs, err)
+		return nil, nil, fmt.Errorf("prepare rootfs: %w", err)
 	}
+	log.Printf("prepared rootfs for vm=%s rootfs=%s", vm.Name, vm.RootfsPath)
 
 	if err := vm.SetUpNework(); err != nil {
-		return nil, nil, err
+		log.Printf("failed to setup network for vm=%s tap=%s host_ip=%s err=%v", vm.Name, vm.TapName, vm.HostIP, err)
+		return nil, nil, fmt.Errorf("setup network: %w", err)
 	}
+	log.Printf("configured network for vm=%s tap=%s host_ip=%s", vm.Name, vm.TapName, vm.HostIP)
 
 	cmd, err := vm.startFirecraker()
 
 	if err != nil {
-		return nil, nil, err
+		log.Printf("failed to start firecracker for vm=%s socket=%s err=%v", vm.Name, vm.SocketPath, err)
+		return nil, nil, fmt.Errorf("start firecracker: %w", err)
 	}
+	log.Printf("started firecracker process for vm=%s pid=%d socket=%s", vm.Name, cmd.Process.Pid, vm.SocketPath)
 
 	if err := vm.waitForSocket(2 * time.Second); err != nil {
-		cmd.Process.Kill()
-		return nil, nil, err
+		log.Printf("failed waiting for firecracker socket for vm=%s socket=%s err=%v", vm.Name, vm.SocketPath, err)
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+		}
+		return nil, cmd, fmt.Errorf("wait for socket: %w", err)
 	}
+	log.Printf("firecracker socket ready for vm=%s socket=%s", vm.Name, vm.SocketPath)
 
 	if err := vm.ConfigVm(); err != nil {
-		cmd.Process.Kill()
-		return nil, nil, err
+		log.Printf("failed to configure/start firecracker vm=%s socket=%s tap=%s err=%v", vm.Name, vm.SocketPath, vm.TapName, err)
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+		}
+		return nil, cmd, fmt.Errorf("configure vm: %w", err)
 	}
 
-	fmt.Println("started", vm.Name)
-	fmt.Println("guest ip:", vm.GuestIP)
-	fmt.Println("socket:", vm.SocketPath)
-	fmt.Println("tap:", vm.TapName)
+	log.Printf("started vm=%s guest_ip=%s socket=%s tap=%s", vm.Name, vm.GuestIP, vm.SocketPath, vm.TapName)
 
 	time.Sleep(100 * time.Millisecond)
 	return &vm, cmd, nil

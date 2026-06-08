@@ -3,6 +3,7 @@ package controller
 import (
 	"bytes"
 	"io"
+	"log"
 	"net/http"
 
 	"github.com/gofiber/fiber/v3"
@@ -13,8 +14,7 @@ func Execute(c fiber.Ctx) error {
 
 	vm, cmd, err := start.CreateVm()
 	if err != nil {
-
-		println(err.Error())
+		log.Printf("failed to create vm: %v", err)
 		if cmd != nil && cmd.Process != nil {
 			_ = cmd.Process.Kill()
 		}
