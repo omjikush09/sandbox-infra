@@ -1,10 +1,11 @@
 "use client";
 
 import { Copy, Play, RotateCcw } from "lucide-react";
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useState } from "react";
 
 type ExecutePayload = {
   data?: unknown;
+  output?: unknown;
   stdout?: unknown;
   stderr?: unknown;
   out?: unknown;
@@ -26,8 +27,20 @@ console.error("stderr example");
 const result = [1, 2, 3].map((value) => value * 2);
 console.log(JSON.stringify({ result }, null, 2));`;
 
+const runnerBaseUrl = process.env.NEXT_PUBLIC_RUNNER_BASE_URL ?? "http://localhost:3000";
+const executeEndpoint = process.env.NEXT_PUBLIC_EXECUTE_ENDPOINT ?? "/api/execute/js";
+
 function cleanBaseUrl(value: string) {
   return value.trim().replace(/\/+$/, "");
+}
+
+function buildRequestUrl() {
+  const base = cleanBaseUrl(runnerBaseUrl);
+  const path = executeEndpoint.trim().startsWith("/")
+    ? executeEndpoint.trim()
+    : `/${executeEndpoint.trim()}`;
+
+  return `${base}${path}`;
 }
 
 function asText(value: unknown) {
@@ -48,8 +61,10 @@ function normalizeResponse(payload: ExecutePayload): RunResult {
     : undefined;
 
   const stdout =
+    asText(payload.output) ||
     asText(payload.stdout) ||
     asText(payload.out) ||
+    asText(nested?.output) ||
     asText(nested?.stdout) ||
     asText(nested?.out) ||
     asText(payload.data);
@@ -73,10 +88,6 @@ function normalizeResponse(payload: ExecutePayload): RunResult {
 }
 
 export default function Home() {
-  const [vmUrl, setVmUrl] = useState(
-    process.env.NEXT_PUBLIC_DEFAULT_VM_URL ?? "http://localhost:3000"
-  );
-  const [endpoint, setEndpoint] = useState("/api/execute/js");
   const [code, setCode] = useState(defaultCode);
   const [result, setResult] = useState<RunResult>({
     stdout: "",
@@ -85,17 +96,11 @@ export default function Home() {
     exitCode: ""
   });
 
-  const requestUrl = useMemo(() => {
-    const base = cleanBaseUrl(vmUrl);
-    const path = endpoint.trim().startsWith("/") ? endpoint.trim() : `/${endpoint.trim()}`;
-    return `${base}${path}`;
-  }, [endpoint, vmUrl]);
-
   async function execute(nextCode = code) {
-    if (!cleanBaseUrl(vmUrl)) {
+    if (!cleanBaseUrl(runnerBaseUrl)) {
       setResult({
         stdout: "",
-        stderr: "Enter a VM URL before running code.",
+        stderr: "Missing NEXT_PUBLIC_RUNNER_BASE_URL.",
         status: "error",
         exitCode: ""
       });
@@ -110,7 +115,7 @@ export default function Home() {
     });
 
     try {
-      const response = await fetch(requestUrl, {
+      const response = await fetch(buildRequestUrl(), {
         method: "POST",
         headers: {
           "Content-Type": "application/json"
@@ -175,27 +180,6 @@ export default function Home() {
       </section>
 
       <form className="workspace" onSubmit={runCode}>
-        <section className="panel connection-panel" aria-label="Execution target">
-          <label>
-            <span>Runner URL</span>
-            <input
-              type="url"
-              value={vmUrl}
-              onChange={(event) => setVmUrl(event.target.value)}
-              placeholder="https://runner.example.com"
-            />
-          </label>
-
-          <label>
-            <span>Execute endpoint</span>
-            <input
-              value={endpoint}
-              onChange={(event) => setEndpoint(event.target.value)}
-              placeholder="/api/execute/js"
-            />
-          </label>
-        </section>
-
         <section className="panel editor-panel" aria-label="JavaScript editor">
           <div className="panel-header">
             <h2>Code</h2>
@@ -220,10 +204,7 @@ export default function Home() {
 
         <section className="panel output-panel" aria-label="Execution output">
           <div className="panel-header">
-            <div>
-              <h2>Output</h2>
-              <p>{requestUrl}</p>
-            </div>
+            <h2>Output</h2>
             <button className="icon-button" type="button" onClick={copyOutput}>
               <Copy size={18} aria-hidden="true" />
               <span className="sr-only">Copy output</span>

@@ -14,8 +14,11 @@ npm run dev
 The app defaults to `http://localhost:3000/api/execute/js`. You can change the runner URL in the page, or set:
 
 ```sh
-NEXT_PUBLIC_DEFAULT_VM_URL=https://your-vm.example.com
+NEXT_PUBLIC_RUNNER_BASE_URL=https://runner.example.com
+NEXT_PUBLIC_EXECUTE_ENDPOINT=/api/execute/js
 ```
+
+For local development, copy `.env.example` to `.env.local` and adjust the values. The URL is not shown in the UI.
 
 ## Deploy
 

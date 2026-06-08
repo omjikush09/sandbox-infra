@@ -17,6 +17,12 @@ import (
 
 const firecrackerLabPath = "/home/ubuntu/firecracker-lab"
 
+const (
+	rootfsBucket = "firecracker-rootfs-bucket"
+	rootfsKey    = "firecracker/rootfs/node-agent-rootfs.ext4.zst"
+	rootfsRegion = "us-east-1"
+)
+
 func main() {
 	err := initSystem()
 	if err != nil {
@@ -67,7 +73,9 @@ func initSystem() error {
 }
 
 func downloadRootfs(folderPath string) error {
-	cfg, err := config.LoadDefaultConfig(context.Background())
+	compressedRootfsPath := folderPath + "/rootfs.ext4.zst"
+
+	cfg, err := config.LoadDefaultConfig(context.Background(), config.WithRegion(rootfsRegion))
 	if err != nil {
 		return err
 	}
@@ -75,15 +83,15 @@ func downloadRootfs(folderPath string) error {
 	s3Client := s3.NewFromConfig(cfg)
 
 	resp, err := s3Client.GetObject(context.Background(), &s3.GetObjectInput{
-		Bucket: aws.String("firecracker-rootfs-bucket"),
-		Key:    aws.String("firecracker/rootfs" + "/node-agent-rootfs" + ".ext4" + ".zst"),
+		Bucket: aws.String(rootfsBucket),
+		Key:    aws.String(rootfsKey),
 	})
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
 
-	file, err := os.Create(folderPath + "/rootfs.ext4.zst")
+	file, err := os.Create(compressedRootfsPath)
 	if err != nil {
 		return err
 	}
@@ -97,9 +105,7 @@ func downloadRootfs(folderPath string) error {
 		return err
 	}
 
-	cmd := exec.Command("zstd", "-d", folderPath+"/rootfs.ext4.zst")
-	err = cmd.Run()
-	if err != nil {
+	if err := exec.Command("zstd", "-d", compressedRootfsPath).Run(); err != nil {
 		return err
 	}
 

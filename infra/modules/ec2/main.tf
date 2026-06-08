@@ -23,6 +23,46 @@ data "aws_vpc" "default" {
   default = true
 }
 
+resource "aws_iam_role" "firecraker" {
+  name = "firecraker-ec2-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          Service = "ec2.amazonaws.com"
+        }
+        Action = "sts:AssumeRole"
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy" "firecraker_rootfs" {
+  name = "firecraker-rootfs-s3-access"
+  role = aws_iam_role.firecraker.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:GetObject"
+        ]
+        Resource = "arn:aws:s3:::firecracker-rootfs-bucket/firecracker/rootfs/node-agent-rootfs.ext4.zst"
+      }
+    ]
+  })
+}
+
+resource "aws_iam_instance_profile" "firecraker" {
+  name = "firecraker-ec2-profile"
+  role = aws_iam_role.firecraker.name
+}
+
 resource "aws_security_group" "firecraker" {
   name   = "Firecrake security group"
   vpc_id = data.aws_vpc.default.id
@@ -53,6 +93,7 @@ resource "aws_instance" "firecraker" {
   security_groups             = [aws_security_group.firecraker.name]
   associate_public_ip_address = true
   key_name                    = data.aws_key_pair.ec2Key.key_name
+  iam_instance_profile        = aws_iam_instance_profile.firecraker.name
 
   cpu_options {
     nested_virtualization = "enabled"
