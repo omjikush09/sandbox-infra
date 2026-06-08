@@ -1,6 +1,7 @@
 package services
 
 import (
+	"bytes"
 	"os"
 	"os/exec"
 
@@ -9,15 +10,40 @@ import (
 
 var filePath = "./code.js"
 
+type ExecuteResult struct {
+	Output   string `json:"output"`
+	Stderr   string `json:"stderr"`
+	ExitCode int    `json:"exitCode"`
+	Error    string `json:"error,omitempty"`
+}
+
 func WriteToFile(code *models.Execute) error {
 	return os.WriteFile(filePath, []byte(code.Code), 0644)
 }
 
-func ExecuteJS() (string, error) {
+func ExecuteJS() ExecuteResult {
+	result := ExecuteResult{}
 
 	bunCommand := exec.Command("bun", "run", filePath)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	bunCommand.Stdout = &stdout
+	bunCommand.Stderr = &stderr
 
-	out, err := bunCommand.CombinedOutput()
+	err := bunCommand.Run()
+	result.Output = stdout.String()
+	result.Stderr = stderr.String()
 
-	return string(out), err
+	if err == nil {
+		return result
+	}
+
+	result.Error = err.Error()
+	if exitError, ok := err.(*exec.ExitError); ok {
+		result.ExitCode = exitError.ExitCode()
+		return result
+	}
+
+	result.ExitCode = -1
+	return result
 }

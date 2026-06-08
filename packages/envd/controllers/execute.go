@@ -20,8 +20,13 @@ func ExecuteJS(c fiber.Ctx) error {
 			"error": err.Error(),
 		})
 	}
-	data, _ := services.ExecuteJS()
+	data := services.ExecuteJS()
 	return c.Status(200).JSON(fiber.Map{
-		"data": data,
+		"data":     data.Output,
+		"output":   data.Output,
+		"stdout":   data.Output,
+		"stderr":   data.Stderr,
+		"exitCode": data.ExitCode,
+		"error":    data.Error,
 	})
 }
