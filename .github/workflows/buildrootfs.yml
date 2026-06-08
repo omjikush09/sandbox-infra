@@ -1,30 +1,143 @@
-# This workflow will build a golang project
-# For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-go
-
-name: Go
+name: Build Firecracker RootFS
 
 on:
   push:
-    branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
+    branches: ["main"]
+  workflow_dispatch:
+
+env:
+  IMAGE_NAME: node-agent-rootfs
+  S3_BUCKET: firecracker-rootfs-bucket
+  S3_PREFIX: firecracker/rootfs
 
 jobs:
-
   build:
     runs-on: ubuntu-latest
+
     steps:
-    - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-    - name: Set up Go
-      uses: actions/setup-go@v4
-      with:
-        go-version: '1.20'
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: "1.26"
 
-    - name: Build
-      run: go build -v ./...
+      - name: Build agent
+        run: |
+          GOOS=linux GOARCH=amd64 go build -o my-agent ./cmd/agent
 
-    - name: stepup ubuntu
-      run: sudo apt update 
-       sudo apt install -y debootstrap e2fsprogs curl
-      
+      - name: Setup host dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y debootstrap e2fsprogs curl zstd
+
+      - name: Create empty rootfs
+        run: |
+          dd if=/dev/zero of=rootfs.ext4 bs=1M count=4096
+          mkfs.ext4 rootfs.ext4
+
+      - name: Mount rootfs
+        run: |
+          mkdir mnt
+          sudo mount -o loop rootfs.ext4 mnt
+
+      - name: Bootstrap Ubuntu
+        run: |
+          sudo debootstrap \
+            --arch=amd64 \
+            noble \
+            ./mnt \
+            http://archive.ubuntu.com/ubuntu/
+
+      - name: Prepare chroot
+        run: |
+          sudo mount --bind /dev mnt/dev
+          sudo mount --bind /proc mnt/proc
+          sudo mount --bind /sys mnt/sys
+          sudo cp /etc/resolv.conf mnt/etc/resolv.conf
+
+      - name: Install packages inside rootfs
+        run: |
+          sudo chroot mnt /bin/bash -c "
+            apt update &&
+            apt install -y \
+              systemd \
+              systemd-sysv \
+              dbus \
+              curl \
+              ca-certificates \
+              git \
+              iproute2 \
+              iputils-ping
+          "
+
+      - name: Install Bun inside rootfs
+        run: |
+          sudo chroot mnt /bin/bash -c "
+            curl -fsSL https://bun.sh/install | bash &&
+            mv /root/.bun/bin/bun /usr/local/bin/bun &&
+            bun --version
+          "
+
+      - name: Add workspace
+        run: |
+          sudo mkdir -p mnt/workspace
+          sudo chmod 777 mnt/workspace
+
+      - name: Copy agent to rootfs
+        run: |
+          sudo cp my-agent mnt/usr/local/bin/my-agent
+          sudo chmod +x mnt/usr/local/bin/my-agent
+
+      - name: Add agent systemd service
+        run: |
+          sudo tee mnt/etc/systemd/system/agent.service > /dev/null <<'EOF'
+          [Unit]
+          Description=My VM Agent
+          After=network.target
+
+          [Service]
+          ExecStart=/usr/local/bin/my-agent
+          Restart=always
+          RestartSec=2
+          WorkingDirectory=/workspace
+
+          [Install]
+          WantedBy=multi-user.target
+          EOF
+
+          sudo chroot mnt /bin/bash -c "systemctl enable agent.service"
+          sudo chroot mnt /bin/bash -c "systemctl enable serial-getty@ttyS0.service"
+
+      - name: Clean rootfs
+        run: |
+          sudo chroot mnt /bin/bash -c "
+            apt clean &&
+            rm -rf /var/lib/apt/lists/*
+          "
+          sudo rm -f mnt/etc/resolv.conf
+
+      - name: Unmount rootfs
+        if: always()
+        run: |
+          sudo umount mnt/dev || true
+          sudo umount mnt/proc || true
+          sudo umount mnt/sys || true
+          sudo umount mnt || true
+
+      - name: Compress image
+        run: |
+          zstd -19 rootfs.ext4 -o ${IMAGE_NAME}.ext4.zst
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Upload to S3
+        run: |
+          aws s3 cp \
+            ${IMAGE_NAME}.ext4.zst \
+            s3://${S3_BUCKET}/${S3_PREFIX}/${IMAGE_NAME}.ext4.zst
