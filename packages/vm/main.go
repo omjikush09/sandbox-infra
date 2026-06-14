@@ -15,6 +15,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/gofiber/fiber/v3"
+	"github.com/gofiber/fiber/v3/middleware/cors"
 	"github.com/omjikush09/sandboxing-infra/packages/vm/pool"
 	"github.com/omjikush09/sandboxing-infra/packages/vm/router"
 )
@@ -41,6 +42,7 @@ func main() {
 	go pool.InitPoolManager(ctx, 8)
 
 	app := fiber.New()
+	app.Use(cors.New())
 
 	router.Start(app)
 	wg := sync.WaitGroup{}
