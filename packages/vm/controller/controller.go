@@ -3,27 +3,21 @@ package controller
 import (
 	"bytes"
 	"io"
-	"log"
 	"net/http"
 
 	"github.com/gofiber/fiber/v3"
-	"github.com/omjikush09/sandboxing-infra/packages/vm/start"
+	"github.com/omjikush09/sandboxing-infra/packages/vm/pool"
 )
 
 func Execute(c fiber.Ctx) error {
 
-	vm, cmd, err := start.CreateVm()
-	if err != nil {
-		log.Printf("failed to create vm: %v", err)
-		if cmd != nil && cmd.Process != nil {
-			_ = cmd.Process.Kill()
-		}
-
+	vm, ok := pool.GetInstance()
+	if ok == false {
 		return c.Status(500).JSON(fiber.Map{
-			"error": "Failed to create vm",
+			"error": "We are out of capacity",
 		})
 	}
-	defer vm.Cleanup(cmd)
+	defer pool.DeleteVM(vm)
 
 	resp, err := http.Post("http://"+vm.GuestIP+":3000/api/execute/js", "application/json", bytes.NewBuffer(c.Body()))
 

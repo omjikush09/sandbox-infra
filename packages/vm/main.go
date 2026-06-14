@@ -7,11 +7,15 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"os/signal"
+	"sync"
+	"syscall"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/gofiber/fiber/v3"
+	"github.com/omjikush09/sandboxing-infra/packages/vm/pool"
 	"github.com/omjikush09/sandboxing-infra/packages/vm/router"
 )
 
@@ -24,20 +28,34 @@ const (
 )
 
 func main() {
+	ctx := context.Background()
+	ctx, cancel := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	defer cancel()
 	err := initSystem()
+
 	if err != nil {
 		fmt.Println(err.Error())
 		return
 	}
 
+	go pool.InitPoolManager(ctx, 8)
+
 	app := fiber.New()
 
 	router.Start(app)
+	wg := sync.WaitGroup{}
+
+	wg.Go(func() {
+		<-ctx.Done()
+		app.Shutdown()
+	})
 
 	PORT := "8000"
 	if err := app.Listen(":" + PORT); err != nil {
 		fmt.Println(err.Error())
 	}
+
+	wg.Wait()
 
 }
 
