@@ -59,36 +59,32 @@ jailer --version
 
 # --- KVM access setup ---------------------------------------------------------
 echo
+TARGET_USER="ubuntu"
+
 if [[ ! -e /dev/kvm ]]; then
   echo ">> warning: /dev/kvm does not exist — KVM module not loaded or no virt support"
   echo "   check: lsmod | grep kvm  &&  egrep -c '(vmx|svm)' /proc/cpuinfo"
-elif [[ -r /dev/kvm && -w /dev/kvm ]]; then
-  echo ">> /dev/kvm is accessible — ready to boot microVMs"
 else
-  TARGET_USER="${SUDO_USER:-$(whoami)}"
-  echo ">> /dev/kvm exists but ${TARGET_USER} can't access it — fixing group membership"
+  echo ">> configuring /dev/kvm access for ${TARGET_USER}"
 
-  # ensure the kvm group exists
-  if ! getent group kvm >/dev/null; then
-    $SUDO groupadd -r kvm
-  fi
-
-  # make sure the device is owned by group kvm with 0660 (it usually is on Ubuntu, but be safe)
+  $SUDO groupadd -f kvm
   $SUDO chgrp kvm /dev/kvm
   $SUDO chmod 0660 /dev/kvm
 
-  # add user to the group
-  if id -nG "$TARGET_USER" | tr ' ' '\n' | grep -qx kvm; then
-    echo "   ${TARGET_USER} is already in the kvm group — current shell just hasn't picked it up"
-  else
+  if id -u "$TARGET_USER" >/dev/null 2>&1; then
     $SUDO usermod -aG kvm "$TARGET_USER"
     echo "   added ${TARGET_USER} to the kvm group"
+  else
+    echo "   warning: user ${TARGET_USER} does not exist yet"
   fi
 
-  echo
-  echo ">> NOTE: group changes don't apply to your current shell."
-  echo "   run one of:"
-  echo "     newgrp kvm        # activates the group in this shell"
-  echo "     exit + re-login   # cleaner, applies everywhere"
-  echo "   then verify: [ -r /dev/kvm ] && [ -w /dev/kvm ] && echo OK"
+  $SUDO install -m 0644 /dev/stdin /etc/udev/rules.d/60-kvm.rules <<'EOF'
+KERNEL=="kvm", GROUP="kvm", MODE="0660"
+EOF
+  $SUDO udevadm control --reload-rules || true
+  $SUDO udevadm trigger --subsystem-match=misc --sysname-match=kvm || true
+
+  echo ">> /dev/kvm permissions:"
+  ls -l /dev/kvm
+  echo ">> restart the VM manager after this script so ${TARGET_USER}'s kvm group membership is active"
 fi

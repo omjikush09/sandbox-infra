@@ -371,7 +371,7 @@ func CreateVm() (*VM, error) {
 		return nil, fmt.Errorf("configure vm: %w", err)
 	}
 
-	if err := vm.waitForAgent(30 * time.Second); err != nil {
+	if err := vm.waitForAgent(3 * time.Minute); err != nil {
 		log.Printf("failed waiting for agent vm=%s guest_ip=%s log=%s err=%v", vm.Name, vm.GuestIP, vm.LogPath, err)
 		vm.Cleanup()
 		return nil, fmt.Errorf("wait for agent: %w", err)

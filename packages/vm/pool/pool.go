@@ -26,7 +26,7 @@ func (p *Pool) AddToPool() {
 	vm, err := start.CreateVm()
 
 	if err != nil {
-		slog.Error("Failed to Create ")
+		slog.Error("Failed to create VM ", "err", err)
 		return
 	}
 
