@@ -11,23 +11,23 @@ npm install
 npm run dev
 ```
 
-The app defaults to `http://localhost:3000/api/execute/js`. You can change the runner URL in the page, or set:
+The backend base URL is loaded from environment. Set:
 
 ```sh
-NEXT_PUBLIC_RUNNER_BASE_URL=https://runner.example.com
-NEXT_PUBLIC_EXECUTE_ENDPOINT=/api/execute/js
+NEXT_PUBLIC_RUNNER_BASE_URL=http://localhost:8000
+NEXT_PUBLIC_EXECUTE_ENDPOINT=/api/execute
 ```
 
-For local development, copy `.env.example` to `.env.local` and adjust the values. The URL is not shown in the UI.
+For local development, copy `.env.example` to `.env.local` and adjust the values. If `NEXT_PUBLIC_RUNNER_BASE_URL` is missing, the UI will show a configuration error instead of calling a fallback host.
 
 ## Deploy
 
 Deploy `apps/frontend` as the project root on Vercel, Netlify, or any host that supports Next.js.
 
-The VM endpoint must accept browser requests and respond to:
+The VM backend endpoint must accept browser requests and respond to:
 
 ```http
-POST /api/execute/js
+POST /api/execute
 Content-Type: application/json
 
 { "code": "console.log('hello')" }

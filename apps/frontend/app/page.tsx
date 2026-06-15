@@ -27,8 +27,9 @@ console.error("stderr example");
 const result = [1, 2, 3].map((value) => value * 2);
 console.log(JSON.stringify({ result }, null, 2));`;
 
-const runnerBaseUrl = process.env.NEXT_PUBLIC_RUNNER_BASE_URL ?? "http://localhost:3000";
-const executeEndpoint = process.env.NEXT_PUBLIC_EXECUTE_ENDPOINT ?? "/api/execute/js";
+const runnerBaseUrl = process.env.NEXT_PUBLIC_RUNNER_BASE_URL ?? "";
+const executeEndpoint = process.env.NEXT_PUBLIC_EXECUTE_ENDPOINT ?? "/api/execute";
+const executionTimeoutMs = 120_000;
 
 function cleanBaseUrl(value: string) {
   return value.trim().replace(/\/+$/, "");
@@ -36,6 +37,10 @@ function cleanBaseUrl(value: string) {
 
 function buildRequestUrl() {
   const base = cleanBaseUrl(runnerBaseUrl);
+  if (!base) {
+    return "";
+  }
+
   const path = executeEndpoint.trim().startsWith("/")
     ? executeEndpoint.trim()
     : `/${executeEndpoint.trim()}`;
@@ -89,6 +94,7 @@ function normalizeResponse(payload: ExecutePayload): RunResult {
 
 export default function Home() {
   const [code, setCode] = useState(defaultCode);
+  const requestUrl = buildRequestUrl();
   const [result, setResult] = useState<RunResult>({
     stdout: "",
     stderr: "",
@@ -114,12 +120,16 @@ export default function Home() {
       exitCode: ""
     });
 
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), executionTimeoutMs);
+
     try {
-      const response = await fetch(buildRequestUrl(), {
+      const response = await fetch(requestUrl, {
         method: "POST",
         headers: {
           "Content-Type": "application/json"
         },
+        signal: controller.signal,
         body: JSON.stringify({ code: nextCode })
       });
 
@@ -144,12 +154,21 @@ export default function Home() {
           : normalized.stderr || `Request failed with HTTP ${response.status}.`
       });
     } catch (error) {
+      const message =
+        error instanceof DOMException && error.name === "AbortError"
+          ? "Backend execution timed out before a response was returned."
+          : error instanceof Error
+            ? error.message
+            : String(error);
+
       setResult({
         stdout: "",
-        stderr: error instanceof Error ? error.message : String(error),
+        stderr: message,
         status: "error",
         exitCode: ""
       });
+    } finally {
+      window.clearTimeout(timeoutId);
     }
   }
 
@@ -171,7 +190,7 @@ export default function Home() {
       <section className="topbar" aria-label="VM connection">
         <div>
           <p className="eyebrow">Sandbox JS Runner</p>
-          <h1>Execute JavaScript in a fresh VM</h1>
+          <h1>Execute JavaScript in a Firecracker microVM</h1>
         </div>
         <div className={`status status-${result.status}`}>
           <span aria-hidden="true" />
@@ -182,7 +201,10 @@ export default function Home() {
       <form className="workspace" onSubmit={runCode}>
         <section className="panel editor-panel" aria-label="JavaScript editor">
           <div className="panel-header">
-            <h2>Code</h2>
+            <div>
+              <h2>Request code</h2>
+              <p>Sent to the backend for Firecracker execution.</p>
+            </div>
             <button className="icon-button" type="button" onClick={() => setCode(defaultCode)}>
               <RotateCcw size={18} aria-hidden="true" />
               <span className="sr-only">Reset code</span>
@@ -197,14 +219,17 @@ export default function Home() {
           <div className="actions">
             <button className="primary-button" type="submit" disabled={result.status === "running"}>
               <Play size={18} aria-hidden="true" />
-              {result.status === "running" ? "Running" : "Run code"}
+              {result.status === "running" ? "Executing" : "Execute request"}
             </button>
           </div>
         </section>
 
         <section className="panel output-panel" aria-label="Execution output">
           <div className="panel-header">
-            <h2>Output</h2>
+            <div>
+              <h2>Backend response</h2>
+              <p>Output returned after the Firecracker VM finishes.</p>
+            </div>
             <button className="icon-button" type="button" onClick={copyOutput}>
               <Copy size={18} aria-hidden="true" />
               <span className="sr-only">Copy output</span>

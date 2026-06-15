@@ -4,6 +4,12 @@ Sandboxing Infra is an experimental infrastructure project for running isolated 
 
 > This project is still in development. APIs, package layout, infrastructure settings, and setup steps are expected to change.
 
+## Architecture
+
+![Sandboxing Infra backend architecture](./architecture.svg)
+
+The current backend path accepts a code execution request, checks out a warm Firecracker microVM, forwards the request into the guest agent, executes JavaScript with Bun inside the guest, and returns stdout, stderr, exit code, and error data to the caller.
+
 ## Project Goals
 
 - Provision Linux hosts suitable for Firecracker-based sandboxing.
@@ -22,7 +28,7 @@ Sandboxing Infra is an experimental infrastructure project for running isolated 
 │   ├── vm/                         # Firecracker client and VM startup code
 │   │   ├── client/                 # HTTP client for Firecracker Unix socket API
 │   │   └── start/                  # VM startup and network setup helpers
-│   ├── envd/                       # Environment daemon placeholder
+│   ├── envd/                       # Guest execution daemon for JavaScript requests
 │   └── orchestator/                # Orchestrator placeholder
 └── infra/
     ├── main.tf                     # Terraform AWS provider and EC2 module wiring
@@ -37,8 +43,25 @@ The `packages/vm` module contains early Go code for:
 
 - Creating an HTTP client that talks to the Firecracker API over a Unix socket.
 - Sending Firecracker API requests.
-- Starting the `firecracker` process with an API socket.
-- Setting up TAP networking and host NAT rules for guest connectivity.
+- Starting the `firecracker` process with a per-VM API socket.
+- Copying the base root filesystem into a per-VM writable rootfs.
+- Setting up TAP networking for guest connectivity.
+- Configuring machine resources, boot source, root drive, network interface, and instance start actions.
+- Maintaining an idle VM pool and routing `POST /api/execute` requests into an available guest.
+- Cleaning up Firecracker processes, sockets, TAP devices, and rootfs copies after execution.
+
+### Guest execution daemon
+
+The `packages/envd` module is the in-guest backend agent. It exposes a Fiber API on port `3000`:
+
+- `POST /api/execute/js` accepts a JSON body with a `code` field.
+- The submitted code is written to `code.js`.
+- The daemon runs the file with `bun run`.
+- The response includes `stdout`, `stderr`, `exitCode`, and `error` fields.
+
+### Backend entrypoint
+
+The `packages/vm` server listens on port `8000` with CORS enabled. On startup it prepares `/home/ubuntu/firecracker-lab`, downloads the rootfs from S3 when missing, downloads the Firecracker quickstart kernel when missing, and starts a pool manager targeting eight idle microVMs.
 
 ### Infrastructure
 

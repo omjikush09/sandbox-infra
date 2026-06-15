@@ -1,0 +1,105 @@
+<svg width="1200" height="760" viewBox="0 0 1200 760" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">Sandboxing Infra Backend Architecture</title>
+  <desc id="desc">Architecture diagram showing the frontend calling the backend API, VM pool, Firecracker microVM, envd guest agent, Bun runtime, and infrastructure dependencies.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth">
+      <path d="M2,2 L10,6 L2,10 Z" fill="#25415f"/>
+    </marker>
+    <style>
+      .bg { fill: #f7f9fc; }
+      .panel { fill: #ffffff; stroke: #c9d6e5; stroke-width: 2; rx: 18; }
+      .host { fill: #eef6f1; stroke: #8fc7a3; stroke-width: 2; rx: 18; }
+      .vm { fill: #fff8ea; stroke: #e0b65c; stroke-width: 2; rx: 16; }
+      .box { fill: #ffffff; stroke: #9fb2c8; stroke-width: 2; rx: 12; }
+      .done { fill: #e8f4ee; stroke: #6fab82; stroke-width: 2; rx: 12; }
+      .pending { fill: #fff4e1; stroke: #d7a44b; stroke-width: 2; rx: 12; }
+      .infra { fill: #eef1fa; stroke: #899bd0; stroke-width: 2; rx: 12; }
+      .title { font: 700 28px Arial, sans-serif; fill: #172334; }
+      .section { font: 700 18px Arial, sans-serif; fill: #172334; }
+      .label { font: 600 15px Arial, sans-serif; fill: #172334; }
+      .small { font: 13px Arial, sans-serif; fill: #40536b; }
+      .tiny { font: 12px Arial, sans-serif; fill: #53677f; }
+      .flow { stroke: #25415f; stroke-width: 3; fill: none; marker-end: url(#arrow); }
+      .flow-light { stroke: #6d8097; stroke-width: 2; fill: none; marker-end: url(#arrow); stroke-dasharray: 7 6; }
+      .badge { fill: #234c73; rx: 10; }
+      .badgeText { font: 700 12px Arial, sans-serif; fill: #ffffff; }
+    </style>
+  </defs>
+
+  <rect class="bg" width="1200" height="760"/>
+  <text class="title" x="60" y="56">Sandboxing Infra Backend Architecture</text>
+  <text class="small" x="60" y="84">Current execution path and backend pieces implemented in this repository.</text>
+
+  <rect class="panel" x="54" y="120" width="230" height="148"/>
+  <text class="section" x="82" y="158">Client Layer</text>
+  <rect class="box" x="82" y="184" width="174" height="58"/>
+  <text class="label" x="110" y="209">Next.js Frontend</text>
+  <text class="tiny" x="104" y="230">apps/frontend</text>
+
+  <rect class="panel" x="348" y="104" width="330" height="268"/>
+  <text class="section" x="378" y="142">Backend API Host</text>
+  <rect class="done" x="380" y="170" width="266" height="70"/>
+  <text class="label" x="410" y="197">Fiber API on :8000</text>
+  <text class="tiny" x="407" y="218">POST /api/execute</text>
+  <rect class="done" x="380" y="268" width="266" height="74"/>
+  <text class="label" x="410" y="296">Execution Controller</text>
+  <text class="tiny" x="405" y="317">Gets a VM, proxies code request,</text>
+  <text class="tiny" x="405" y="334">returns guest response.</text>
+
+  <rect class="host" x="744" y="104" width="386" height="496"/>
+  <text class="section" x="776" y="142">Firecracker Host</text>
+  <rect class="done" x="776" y="170" width="314" height="72"/>
+  <text class="label" x="806" y="198">VM Pool Manager</text>
+  <text class="tiny" x="806" y="220">Maintains idle microVM capacity.</text>
+  <rect class="done" x="776" y="268" width="314" height="94"/>
+  <text class="label" x="806" y="296">VM Startup + Config</text>
+  <text class="tiny" x="806" y="318">Copies rootfs, creates TAP device,</text>
+  <text class="tiny" x="806" y="336">configures kernel, drive, network,</text>
+  <text class="tiny" x="806" y="354">and starts the Firecracker instance.</text>
+  <rect class="vm" x="776" y="392" width="314" height="170"/>
+  <text class="section" x="806" y="426">MicroVM Guest</text>
+  <rect class="done" x="806" y="448" width="254" height="46"/>
+  <text class="label" x="850" y="476">envd agent on :3000</text>
+  <rect class="done" x="806" y="510" width="254" height="34"/>
+  <text class="label" x="861" y="533">Bun JavaScript runtime</text>
+
+  <rect class="panel" x="54" y="458" width="624" height="202"/>
+  <text class="section" x="84" y="496">Infrastructure Support</text>
+  <rect class="infra" x="84" y="522" width="166" height="82"/>
+  <text class="label" x="119" y="552">Terraform</text>
+  <text class="tiny" x="111" y="574">EC2 host + security</text>
+  <text class="tiny" x="125" y="592">group wiring</text>
+  <rect class="infra" x="282" y="522" width="166" height="82"/>
+  <text class="label" x="320" y="552">Rootfs Asset</text>
+  <text class="tiny" x="310" y="574">Downloaded from S3</text>
+  <text class="tiny" x="330" y="592">and decompressed</text>
+  <rect class="infra" x="480" y="522" width="166" height="82"/>
+  <text class="label" x="520" y="552">Kernel Asset</text>
+  <text class="tiny" x="510" y="574">Fetched during host</text>
+  <text class="tiny" x="536" y="592">initialization</text>
+
+  <rect class="panel" x="348" y="396" width="330" height="42"/>
+  <text class="small" x="380" y="422">Response includes stdout, stderr, exitCode, and error.</text>
+
+  <path class="flow" d="M256 213 C302 213 320 205 380 205"/>
+  <text class="tiny" x="285" y="192">code request</text>
+  <path class="flow" d="M646 205 C700 205 710 206 776 206"/>
+  <text class="tiny" x="676" y="184">checkout VM</text>
+  <path class="flow" d="M646 305 C710 305 710 318 776 318"/>
+  <text class="tiny" x="672" y="292">proxy body</text>
+  <path class="flow" d="M933 362 L933 448"/>
+  <text class="tiny" x="950" y="407">boot + wait</text>
+  <path class="flow" d="M933 494 L933 510"/>
+  <path class="flow-light" d="M806 527 C726 527 718 418 678 418"/>
+  <text class="tiny" x="686" y="489">execution result</text>
+  <path class="flow-light" d="M380 418 C302 418 302 242 256 242"/>
+  <text class="tiny" x="285" y="381">JSON response</text>
+  <path class="flow-light" d="M250 562 C452 562 596 216 776 206"/>
+  <text class="tiny" x="345" y="471">host provisioning and assets</text>
+
+  <rect class="badge" x="60" y="698" width="100" height="26"/>
+  <text class="badgeText" x="80" y="716">DONE</text>
+  <text class="small" x="178" y="716">Current backend implementation</text>
+  <rect class="pending" x="444" y="698" width="100" height="26"/>
+  <text class="small" x="562" y="716">Orchestrator package still has placeholder code.</text>
+</svg>
