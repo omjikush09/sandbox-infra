@@ -6,7 +6,7 @@ import (
 	"net/http"
 
 	"github.com/gofiber/fiber/v3"
-	"github.com/omjikush09/sandboxing-infra/packages/vm/pool"
+	pool "github.com/omjikush09/sandboxing-infra/packages/vm/vmpool"
 )
 
 func Execute(c fiber.Ctx) error {

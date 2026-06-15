@@ -16,8 +16,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/gofiber/fiber/v3"
 	"github.com/gofiber/fiber/v3/middleware/cors"
-	"github.com/omjikush09/sandboxing-infra/packages/vm/pool"
 	"github.com/omjikush09/sandboxing-infra/packages/vm/router"
+	"github.com/omjikush09/sandboxing-infra/packages/vm/vmpool"
 )
 
 const firecrackerLabPath = "/home/ubuntu/firecracker-lab"
@@ -39,7 +39,7 @@ func main() {
 		return
 	}
 
-	go pool.InitPoolManager(ctx, 8)
+	go vmpool.InitPoolManager(ctx, 8)
 
 	app := fiber.New()
 	app.Use(cors.New())

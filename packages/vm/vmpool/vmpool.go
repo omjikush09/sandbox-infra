@@ -1,4 +1,4 @@
-package pool
+package vmpool
 
 import (
 	"log/slog"
@@ -7,13 +7,13 @@ import (
 	"github.com/omjikush09/sandboxing-infra/packages/vm/start"
 )
 
-type Pool struct {
+type VmPool struct {
 	mu     sync.Mutex
 	idleVM map[string]*start.VM
 	inUse  map[string]*start.VM
 }
 
-func (p *Pool) GetSizeIdelVM() int {
+func (p *VmPool) GetSizeIdelVM() int {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -21,7 +21,7 @@ func (p *Pool) GetSizeIdelVM() int {
 
 }
 
-func (p *Pool) AddToPool() {
+func (p *VmPool) AddToPool() {
 
 	vm, err := start.CreateVm()
 
@@ -36,7 +36,7 @@ func (p *Pool) AddToPool() {
 
 }
 
-func (p *Pool) GetaVM() (*start.VM, bool) {
+func (p *VmPool) GetaVM() (*start.VM, bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -47,7 +47,7 @@ func (p *Pool) GetaVM() (*start.VM, bool) {
 	return nil, false
 }
 
-func (p *Pool) markAsInUse(id string) {
+func (p *VmPool) markAsInUse(id string) {
 
 	vm, ok := p.idleVM[id]
 	if !ok {
@@ -57,7 +57,7 @@ func (p *Pool) markAsInUse(id string) {
 	delete(p.idleVM, id)
 }
 
-func (p *Pool) RemoveFromPool(vm *start.VM) {
+func (p *VmPool) RemoveFromPool(vm *start.VM) {
 	if vm == nil {
 		return
 	}
@@ -71,11 +71,11 @@ func (p *Pool) RemoveFromPool(vm *start.VM) {
 
 }
 
-func (p *Pool) destroyVM(vm *start.VM) {
+func (p *VmPool) destroyVM(vm *start.VM) {
 	vm.Cleanup()
 }
 
-func (p *Pool) Clear() {
+func (p *VmPool) Clear() {
 
 	inUse := []*start.VM{}
 	idleVM := []*start.VM{}

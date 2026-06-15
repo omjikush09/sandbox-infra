@@ -1,4 +1,4 @@
-package pool
+package vmpool
 
 import (
 	"context"
@@ -8,7 +8,7 @@ import (
 	"github.com/omjikush09/sandboxing-infra/packages/vm/start"
 )
 
-var pool = Pool{
+var pool = VmPool{
 	mu:     sync.Mutex{},
 	idleVM: make(map[string]*start.VM),
 	inUse:  make(map[string]*start.VM),
