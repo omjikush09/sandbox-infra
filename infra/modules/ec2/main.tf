@@ -107,6 +107,12 @@ resource "aws_instance" "firecraker" {
     nested_virtualization = "enabled"
   }
 
+  root_block_device {
+    volume_size           = 30
+    volume_type           = "gp3"
+    delete_on_termination = true
+  }
+
   user_data = file("${path.module}/init.sh")
 
   tags = {
