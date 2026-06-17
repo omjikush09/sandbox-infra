@@ -17,6 +17,7 @@ import (
 	"github.com/gofiber/fiber/v3"
 	"github.com/gofiber/fiber/v3/middleware/cors"
 	"github.com/omjikush09/sandboxing-infra/packages/vm/router"
+	"github.com/omjikush09/sandboxing-infra/packages/vm/utils"
 	"github.com/omjikush09/sandboxing-infra/packages/vm/vmpool"
 )
 
@@ -62,6 +63,11 @@ func main() {
 }
 
 func initSystem() error {
+
+	if err := setupHostVmNetwork(); err != nil {
+		return err
+	}
+
 	if err := os.MkdirAll(firecrackerLabPath, 0755); err != nil {
 		return err
 	}
@@ -151,4 +157,29 @@ func downloadFile(url, path string) error {
 
 	_, err = io.Copy(file, resp.Body)
 	return err
+}
+
+func setupHostVmNetwork() error {
+	if err := utils.Run("sudo", "sysctl", "-w", "net.ipv4.ip_forward=1"); err != nil {
+		return err
+	}
+
+	err := utils.Run("sudo", "iptables", "-t", "nat", "-C", "POSTROUTING",
+		"-s", "172.16.0.0/16",
+		"-o", "eat0",
+		"-j", "MASQUERADE",
+	)
+
+	if err != nil {
+		err := utils.Run("sudo", "iptables", "-t", "nat", "-A", "POSTROUTING",
+			"-s", "172.16.0.0/16",
+			"-o", "eat0",
+			"-j", "MASQUERADE",
+		)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }

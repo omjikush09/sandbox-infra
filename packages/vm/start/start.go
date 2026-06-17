@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/omjikush09/sandboxing-infra/packages/vm/client"
+	"github.com/omjikush09/sandboxing-infra/packages/vm/utils"
 )
 
 // type Start interface {
@@ -35,15 +36,6 @@ type VM struct {
 	RootfsPath string
 	MAC        string
 	Cmd        *exec.Cmd
-}
-
-func run(cmd string, args ...string) error {
-	c := exec.Command(cmd, args...)
-	c.Stdin = os.Stdin
-	c.Stdout = os.Stdout
-	c.Stderr = os.Stderr
-
-	return c.Run()
 }
 
 func newVM(id int) VM {
@@ -76,7 +68,7 @@ func (vm *VM) prepareRootfs() error {
 		}
 	}
 
-	return run("cp", vm.BaseRootfs, vm.RootfsPath)
+	return utils.Run("cp", vm.BaseRootfs, vm.RootfsPath)
 
 }
 
@@ -93,45 +85,46 @@ func tapDeviceExists(name string) (bool, error) {
 	return true, nil
 }
 
-func (vm *VM) SetUpNework() error {
+func (vm *VM) SetUpNetwork() error {
 	//create tap device
-	if err := run("sudo", "ip", "tuntap", "add", vm.TapName, "mode", "tap"); err != nil {
+	if err := utils.Run("sudo", "ip", "tuntap", "add", vm.TapName, "mode", "tap"); err != nil {
 		return err
 	}
 
 	// assign host-side IP to tap
-	if err := run("sudo", "ip", "addr", "add", vm.HostIP+"/24", "dev", vm.TapName); err != nil {
+	if err := utils.Run("sudo", "ip", "addr", "add", vm.HostIP+"/24", "dev", vm.TapName); err != nil {
 		_ = vm.deleteTapDevice()
 		return err
 	}
 
 	// bring tap up
-	if err := run("sudo", "ip", "link", "set", vm.TapName, "up"); err != nil {
+	if err := utils.Run("sudo", "ip", "link", "set", vm.TapName, "up"); err != nil {
 		_ = vm.deleteTapDevice()
 		return err
 	}
 
 	// enable forwarding
-	// if err := run("sudo", "sysctl", "-w", "net.ipv4.ip_forward=1"); err != nil {
-	// 	return err
-	// }
+	if err := utils.Run("sudo", "sysctl", "-w", "net.ipv4.ip_forward=1"); err != nil {
+		return err
+	}
 
 	// NAT traffic from VM subnet to host internet interface
 
-	// if err := run("sudo", "iptables", "-t", "nat", "-A", "POSTROUTING",
-	// 	"-s", "172.16.0.0/24", "-o", "eth0", "-j", "MASQUERADE"); err != nil {
-	// 	return err
-	// }
-	// if err := run("sudo", "iptables", "-A", "FORWARD",
-	// 	"-i", vm.TapName, "-o", "eth0", "-j", "ACCEPT"); err != nil {
-	// 	return err
-	// }
+	if err := utils.Run("sudo", "iptables", "-t", "nat", "-A", "POSTROUTING",
+		"-s", "172.16.0.0/16", "-o", "eth0", "-j", "MASQUERADE"); err != nil { // 172.16.0.0/16 it is broder, so that all the vm can use this
+		return err
+	}
 
-	// if err := run("sudo", "iptables", "-A", "FORWARD",
-	// 	"-i", "eth0", "-o", vm.TapName,
-	// 	"-m", "state", "--state", "RELATED,ESTABLISHED", "-j", "ACCEPT"); err != nil {
-	// 	return err
-	// }
+	if err := utils.Run("sudo", "iptables", "-A", "FORWARD",
+		"-i", vm.TapName, "-o", "eth0", "-j", "ACCEPT"); err != nil {
+		return err
+	}
+
+	if err := utils.Run("sudo", "iptables", "-A", "FORWARD",
+		"-i", "eth0", "-o", vm.TapName,
+		"-m", "state", "--state", "RELATED,ESTABLISHED", "-j", "ACCEPT"); err != nil {
+		return err
+	}
 
 	return nil
 }
@@ -145,7 +138,7 @@ func (vm *VM) deleteTapDevice() error {
 		return nil
 	}
 
-	return run("sudo", "ip", "link", "delete", vm.TapName)
+	return utils.Run("sudo", "ip", "link", "delete", vm.TapName)
 }
 
 func (vm *VM) Cleanup() {
@@ -342,7 +335,7 @@ func CreateVm() (*VM, error) {
 	}
 	log.Printf("prepared rootfs for vm=%s rootfs=%s", vm.Name, vm.RootfsPath)
 
-	if err := vm.SetUpNework(); err != nil {
+	if err := vm.SetUpNetwork(); err != nil {
 		log.Printf("failed to setup network for vm=%s tap=%s host_ip=%s err=%v", vm.Name, vm.TapName, vm.HostIP, err)
 		vm.Cleanup()
 		return nil, fmt.Errorf("setup network: %w", err)
