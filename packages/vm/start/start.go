@@ -11,10 +11,10 @@ import (
 	"os"
 	"os/exec"
 	"strconv"
-	"sync/atomic"
 	"time"
 
-	"github.com/omjikush09/sandboxing-infra/packages/vm/client"
+	"github.com/omjikush09/sandboxing-infra/packages/vm/firecraker"
+	"github.com/omjikush09/sandboxing-infra/packages/vm/ippool"
 	"github.com/omjikush09/sandboxing-infra/packages/vm/utils"
 )
 
@@ -36,13 +36,14 @@ type VM struct {
 	RootfsPath string
 	MAC        string
 	Cmd        *exec.Cmd
+	ipLease    *ippool.IP
 }
 
-func newVM(id int) VM {
+func newVM(id int, ip *ippool.IP) VM {
 
 	name := fmt.Sprintf("vm%d", id)
-	hostIP := fmt.Sprintf("172.16.%d.1", id)
-	guestIP := fmt.Sprintf("172.16.%d.2", id)
+	hostIP := ip.HostIP
+	guestIP := ip.VmIP
 
 	vm := VM{
 		Id:         strconv.Itoa(id),
@@ -56,6 +57,7 @@ func newVM(id int) VM {
 		KernelPath: "/home/ubuntu/firecracker-lab/vmlinux.bin",
 		BaseRootfs: "/home/ubuntu/firecracker-lab/rootfs.ext4",
 		RootfsPath: fmt.Sprintf("/home/ubuntu/firecracker-lab/%s-rootfs.ext4", name),
+		ipLease:    ip,
 	}
 	return vm
 }
@@ -163,6 +165,10 @@ func (vm *VM) Cleanup() {
 	if err := os.Remove(vm.RootfsPath); err != nil && !errors.Is(err, os.ErrNotExist) {
 		log.Printf("failed to remove rootfs for vm=%s rootfs=%s err=%v", vm.Name, vm.RootfsPath, err)
 	}
+	if vm.ipLease != nil {
+		ippool.ReleaseIP(vm.ipLease)
+		vm.ipLease = nil
+	}
 }
 
 func (vm *VM) startFirecraker() error {
@@ -243,7 +249,7 @@ func put(client *http.Client, path string, body string) error {
 
 func (vm *VM) ConfigVm() error {
 
-	client := client.FirecrakerClient(vm.SocketPath)
+	client := firecraker.FirecrakerClient(vm.SocketPath)
 	if err := put(client, "/machine-config", `{
 			"vcpu_count": 1,
 			"mem_size_mib": 512,
@@ -289,29 +295,31 @@ func (vm *VM) ConfigVm() error {
 
 }
 
-var count atomic.Int32
-
 func nextVM() (VM, error) {
-	for attempts := 0; attempts < 254; attempts++ {
-		counter := count.Add(1)
-		if counter > 254 {
-			count.Store(0)
-			counter = count.Add(1)
+	for attempts := 0; attempts < ippool.MaxSlots; attempts++ {
+		ip, err := ippool.GetAIP()
+
+		if err != nil {
+			return VM{}, fmt.Errorf("no free vm slot available")
 		}
 
-		vm := newVM(int(counter))
+		vm := newVM(ip.ID, ip)
 		exists, err := tapDeviceExists(vm.TapName)
 		if err != nil {
+			ippool.ReleaseIP(ip)
 			return VM{}, err
 		}
 		if exists {
 			log.Printf("skipping vm name=%s because tap device already exists tap=%s", vm.Name, vm.TapName)
+			ippool.ReleaseIP(ip)
 			continue
 		}
 		if _, err := os.Stat(vm.SocketPath); err == nil {
 			log.Printf("skipping vm name=%s because socket already exists socket=%s", vm.Name, vm.SocketPath)
+			ippool.ReleaseIP(ip)
 			continue
 		} else if !errors.Is(err, os.ErrNotExist) {
+			ippool.ReleaseIP(ip)
 			return VM{}, err
 		}
 

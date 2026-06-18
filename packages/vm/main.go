@@ -16,6 +16,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/gofiber/fiber/v3"
 	"github.com/gofiber/fiber/v3/middleware/cors"
+	"github.com/omjikush09/sandboxing-infra/packages/vm/ippool"
+	"github.com/omjikush09/sandboxing-infra/packages/vm/proxy"
 	"github.com/omjikush09/sandboxing-infra/packages/vm/router"
 	"github.com/omjikush09/sandboxing-infra/packages/vm/utils"
 	"github.com/omjikush09/sandboxing-infra/packages/vm/vmpool"
@@ -44,7 +46,7 @@ func main() {
 
 	app := fiber.New()
 	app.Use(cors.New())
-
+	app.Use(proxy.ProxyMiddleware)
 	router.Start(app)
 	wg := sync.WaitGroup{}
 
@@ -67,6 +69,7 @@ func initSystem() error {
 	if err := setupHostVmNetwork(); err != nil {
 		return err
 	}
+	ippool.InitThePool()
 
 	if err := os.MkdirAll(firecrackerLabPath, 0755); err != nil {
 		return err
@@ -163,17 +166,21 @@ func setupHostVmNetwork() error {
 	if err := utils.Run("sudo", "sysctl", "-w", "net.ipv4.ip_forward=1"); err != nil {
 		return err
 	}
+	hostIface, err := utils.DefaultNetworkInterface()
+	if err != nil {
+		return err
+	}
 
-	err := utils.Run("sudo", "iptables", "-t", "nat", "-C", "POSTROUTING",
+	err = utils.Run("sudo", "iptables", "-t", "nat", "-C", "POSTROUTING",
 		"-s", "172.16.0.0/16",
-		"-o", "eat0",
+		"-o", hostIface,
 		"-j", "MASQUERADE",
 	)
 
 	if err != nil {
 		err := utils.Run("sudo", "iptables", "-t", "nat", "-A", "POSTROUTING",
 			"-s", "172.16.0.0/16",
-			"-o", "eat0",
+			"-o", hostIface,
 			"-j", "MASQUERADE",
 		)
 		if err != nil {
