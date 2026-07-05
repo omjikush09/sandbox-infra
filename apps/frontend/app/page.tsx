@@ -21,11 +21,80 @@ type RunResult = {
   exitCode: string;
 };
 
-const defaultCode = `console.log("hello from the sandbox");
-console.error("stderr example");
+const defaultCode = `const jobs = [
+  {
+    job: "A",
+    boxType: "Small mailer",
+    jobStart: "2026-06-20T08:00:00",
+    jobEnd: "2026-06-20T10:15:00",
+    nextJobStart: "2026-06-20T10:42:00",
+    boxesMade: 5000,
+    goodBoxes: 4960,
+    downtimeMinutes: 8
+  },
+  {
+    job: "B",
+    boxType: "Large shipper",
+    jobStart: "2026-06-20T10:42:00",
+    jobEnd: "2026-06-20T13:00:00",
+    nextJobStart: "2026-06-20T13:20:00",
+    boxesMade: 4600,
+    goodBoxes: 4545,
+    downtimeMinutes: 5
+  },
+  {
+    job: "C",
+    boxType: "Printed retail box",
+    jobStart: "2026-06-20T13:20:00",
+    jobEnd: "2026-06-20T15:10:00",
+    nextJobStart: "2026-06-20T15:55:00",
+    boxesMade: 3900,
+    goodBoxes: 3870,
+    downtimeMinutes: 15
+  }
+];
 
-const result = [1, 2, 3].map((value) => value * 2);
-console.log(JSON.stringify({ result }, null, 2));`;
+const minutesBetween = (start, end) =>
+  Math.round((new Date(end) - new Date(start)) / 60000);
+
+const rows = jobs.map((job) => {
+  const productionMinutes = minutesBetween(job.jobStart, job.jobEnd);
+  const changeoverMinutes = minutesBetween(job.jobEnd, job.nextJobStart);
+  const qualityPercent = (job.goodBoxes / job.boxesMade) * 100;
+
+  return {
+    job: job.job,
+    boxType: job.boxType,
+    productionMinutes,
+    changeoverMinutes,
+    boxesPerHour: Math.round((job.goodBoxes / productionMinutes) * 60),
+    cycleSecondsPerGoodBox: Number(((productionMinutes * 60) / job.goodBoxes).toFixed(2)),
+    downtimeMinutes: job.downtimeMinutes,
+    qualityPercent: Number(qualityPercent.toFixed(2))
+  };
+});
+
+const chartData = rows.map((row) => ({
+  label: row.job,
+  changeoverMinutes: row.changeoverMinutes,
+  boxesPerHour: row.boxesPerHour,
+  downtimeMinutes: row.downtimeMinutes
+}));
+
+console.table(rows);
+console.log("Chart data:");
+console.log(JSON.stringify(chartData, null, 2));
+
+const slowestChangeover = rows.reduce((slowest, row) =>
+  row.changeoverMinutes > slowest.changeoverMinutes ? row : slowest
+);
+
+console.log(
+  "Biggest setup delay:",
+  slowestChangeover.job,
+  slowestChangeover.boxType,
+  slowestChangeover.changeoverMinutes + " minutes"
+);`;
 
 const runnerBaseUrl = process.env.NEXT_PUBLIC_RUNNER_BASE_URL ?? "";
 const executeEndpoint = process.env.NEXT_PUBLIC_EXECUTE_ENDPOINT ?? "/api/execute";
